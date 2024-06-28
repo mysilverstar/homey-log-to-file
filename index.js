@@ -6,7 +6,7 @@ async function dynamicImport(module) {
   return (await import(module)).default;
 }
 
-module.exports = async (postUrl = 'http://example.com/post', key = "", homeyId = "", packageName = "") => {
+module.exports = async (postUrl = '', key = "", homeyId = "", packageName = "") => {
   const hookStd = await dynamicImport('hook-std');
   const fetch = await dynamicImport('node-fetch');
 
