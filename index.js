@@ -17,7 +17,7 @@ const fetch = require('node-fetch');
 //   hookStd({ silent : false }, output => { fh.write(output) });
 // }
 
-module.exports = async (postUrl = 'http://example.com/post', key = "", homeyId = "", package ="") => {
+module.exports = async (postUrl = 'http://example.com/post', key = "", homeyId = "", packageName = "") => {
   const { hookStd } = await import('hook-std');
   // const fh = await fs.open(logfile, flags);
 
@@ -46,7 +46,7 @@ module.exports = async (postUrl = 'http://example.com/post', key = "", homeyId =
             headers: { 'Content-Type': 'text/plain', 'x-service-key': 'member_yuji' },
             body: {
               homey : homeyId,
-              package : package,
+              package : packageName,
               message : line
             }
           });
