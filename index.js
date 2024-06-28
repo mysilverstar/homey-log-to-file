@@ -38,9 +38,9 @@ module.exports = async (postUrl, key = "", homeyId = "", packageName = "") => {
               message: line
             })
           });
-          console.log('Line sent to', postUrl);
+          // console.log('Line sent to', postUrl);
         } catch (error) {
-          console.error('Failed to send line:', error);
+          // console.error('Failed to send line:', error);
         }
       }
     }
