@@ -3,12 +3,16 @@ const { createReadStream } = require('node:fs');
 const http = require('http');
 
 async function dynamicImport(module) {
-  return (await import(module)).default;
+  return await import(module);
 }
 
-module.exports = async (postUrl = '', key = "", homeyId = "", packageName = "") => {
-  const hookStd = await dynamicImport('hook-std');
-  const fetch = await dynamicImport('node-fetch');
+module.exports = async (postUrl, key = "", homeyId = "", packageName = "") => {
+  if (!postUrl) {
+    throw new Error("postUrl is not defined");
+  }
+  
+  const { hookStd } = await dynamicImport('hook-std');
+  const { default: fetch } = await dynamicImport('node-fetch');
 
   let buffer = '';
 
