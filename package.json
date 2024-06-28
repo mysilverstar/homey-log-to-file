@@ -6,6 +6,7 @@
   "author": "Robert Klep <robert@klep.name>",
   "license": "MIT",
   "dependencies": {
-    "hook-std": "^3.0.0"
+    "hook-std": "^3.0.0",
+    "node-fetch": "^3.3.2"
   }
 }
