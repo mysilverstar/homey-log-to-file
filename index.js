@@ -1,14 +1,14 @@
-import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import http from 'http';
+const fs = require('node:fs/promises');
+const { createReadStream } = require('node:fs');
+const http = require('http');
 
-const fetch = async (url, options) => {
-  const { default: fetch } = await import('node-fetch');
-  return fetch(url, options);
-};
+async function dynamicImport(module) {
+  return (await import(module)).default;
+}
 
-export default async (postUrl = 'http://example.com/post', key = "", homeyId = "", packageName = "") => {
-  const { hookStd } = await import('hook-std');
+module.exports = async (postUrl = 'http://example.com/post', key = "", homeyId = "", packageName = "") => {
+  const hookStd = await dynamicImport('hook-std');
+  const fetch = await dynamicImport('node-fetch');
 
   let buffer = '';
 
