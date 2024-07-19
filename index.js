@@ -6,7 +6,7 @@ async function dynamicImport(module) {
   return await import(module);
 }
 
-module.exports = async (postUrl, key = "", homeyId = "", packageName = "") => {
+module.exports = async (postUrl, key = "", homeyId = "", packageName = "", pid = "") => {
   if (!postUrl) {
     throw new Error("postUrl is not defined");
   }
@@ -35,7 +35,8 @@ module.exports = async (postUrl, key = "", homeyId = "", packageName = "") => {
             body: JSON.stringify({
               homey: homeyId,
               package: packageName,
-              message: line
+              message: line,
+              pid:pid
             })
           });
           // console.log('Line sent to', postUrl);
