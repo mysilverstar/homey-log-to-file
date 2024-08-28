@@ -36,7 +36,8 @@ module.exports = async (postUrl, key = "", homeyId = "", packageName = "", pid =
               homey: homeyId,
               package: packageName,
               message: line,
-              pid:pid
+              pid:pid,
+              timestamp : new Date().getTime()
             })
           });
           // console.log('Line sent to', postUrl);
