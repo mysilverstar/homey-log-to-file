@@ -7,7 +7,7 @@ async function dynamicImport(module) {
   return await import(module);
 }
 
-module.exports = async (logfile = '/userdata/std.log', port = 8008, flags = 'w', postUrl = "", key = "") => {
+module.exports = async ({logfile = '/userdata/std.log', port = 8008, flags = 'a', postUrl = "", key = ""}) => {
   const { hookStd } = await import('hook-std');
   const { default: fetch } = await dynamicImport('node-fetch');
   const fh = await fs.open(logfile, flags);
@@ -21,7 +21,6 @@ module.exports = async (logfile = '/userdata/std.log', port = 8008, flags = 'w',
     try {
       const formData = new FormData();
       formData.append('logFile', createReadStream(logfile), 'std.log'); // logFile 필드에 std.log 파일 추가
-
       await fetch(postUrl, {
         method: 'POST',
         headers: {
@@ -30,13 +29,11 @@ module.exports = async (logfile = '/userdata/std.log', port = 8008, flags = 'w',
         },
         body: formData
       });
-
       // 파일의 내용 초기화
       await fs.writeFile(logfile, '', { encoding: 'utf8' }); // 파일을 빈 문자열로 덮어쓰기
-
-      // console.log('File sent and cleared successfully');
+      console.log('File sent and cleared successfully');
     } catch (error) {
-      // console.error('Failed to send file:', error);
+      console.error('Failed to send file:', error);
     }
 
   }).listen(port);
