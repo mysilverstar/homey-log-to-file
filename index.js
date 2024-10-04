@@ -2,10 +2,14 @@ const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const http = require('http');
 const FormData = require('form-data'); // FormData 라이브러리 사용
-const fetch = require('node-fetch'); // fetch 사용을 위한 node-fetch 라이브러리
+
+async function dynamicImport(module) {
+  return await import(module);
+}
 
 module.exports = async (logfile = '/userdata/std.log', port = 8008, flags = 'w', postUrl = "", key = "") => {
   const { hookStd } = await import('hook-std');
+  const { default: fetch } = await dynamicImport('node-fetch');
   const fh = await fs.open(logfile, flags);
 
   // Create HTTP server that will serve the file
