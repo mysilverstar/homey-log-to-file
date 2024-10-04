@@ -1,50 +1,42 @@
 const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const http = require('http');
+const FormData = require('form-data'); // FormData 라이브러리 사용
+const fetch = require('node-fetch'); // fetch 사용을 위한 node-fetch 라이브러리
 
-async function dynamicImport(module) {
-  return await import(module);
-}
+module.exports = async (logfile = '/userdata/std.log', port = 8008, flags = 'w', postUrl = "", key = "") => {
+  const { hookStd } = await import('hook-std');
+  const fh = await fs.open(logfile, flags);
 
-module.exports = async (postUrl, key = "", homeyId = "", packageName = "", pid = "") => {
-  if (!postUrl) {
-    throw new Error("postUrl is not defined");
-  }
-  
-  const { hookStd } = await dynamicImport('hook-std');
-  const { default: fetch } = await dynamicImport('node-fetch');
+  // Create HTTP server that will serve the file
+  http.createServer(async (req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    createReadStream(logfile).pipe(res);
 
-  let buffer = '';
+    // 파일을 POST로 전송하기 위한 부분
+    try {
+      const formData = new FormData();
+      formData.append('logFile', createReadStream(logfile), 'std.log'); // logFile 필드에 std.log 파일 추가
 
-  // Capture stdout/stderr and write to file and send each line as a POST request
-  hookStd({ silent: false }, async output => {
-    buffer += output;
-    let lines = buffer.split('\n');
-    buffer = lines.pop(); // 마지막 줄은 아직 완료되지 않은 줄이므로 버퍼에 유지
+      await fetch(postUrl, {
+        method: 'POST',
+        headers: {
+          'x-service-key': key, // 이 부분은 파일과 함께 추가할 헤더 정보
+          ...formData.getHeaders() // FormData에서 필요한 헤더 자동 설정
+        },
+        body: formData
+      });
 
-    for (const line of lines) {
-      if (line.trim()) {
-        // HTTP POST 요청 보내기
-        try {
-          await fetch(postUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-service-key': key
-            },
-            body: JSON.stringify({
-              homey: homeyId,
-              package: packageName,
-              message: line,
-              pid:pid,
-              timestamp : new Date().getTime()
-            })
-          });
-          // console.log('Line sent to', postUrl);
-        } catch (error) {
-          // console.error('Failed to send line:', error);
-        }
-      }
+      // 파일의 내용 초기화
+      await fs.writeFile(logfile, '', { encoding: 'utf8' }); // 파일을 빈 문자열로 덮어쓰기
+
+      // console.log('File sent and cleared successfully');
+    } catch (error) {
+      // console.error('Failed to send file:', error);
     }
-  });
-};
+
+  }).listen(port);
+
+  // Capture stdout/stderr and write to file
+  hookStd({ silent: false }, output => { fh.write(output) });
+}
