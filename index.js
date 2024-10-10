@@ -7,7 +7,7 @@ async function dynamicImport(module) {
   return await import(module);
 }
 
-module.exports = async ({logfile = '/userdata/std.log', port = 8008, flags = 'a', postUrl = "", key = ""}) => {
+module.exports = async ({logfile = '/userdata/std.log', port = 8008, flags = 'a', postUrl = "", key = "", homeyId = "unknown", appId = "unknown"}) => {
   const { hookStd } = await import('hook-std');
   const { default: fetch } = await dynamicImport('node-fetch');
   const fh = await fs.open(logfile, flags);
@@ -25,6 +25,8 @@ module.exports = async ({logfile = '/userdata/std.log', port = 8008, flags = 'a'
         method: 'POST',
         headers: {
           'x-service-key': key, // 이 부분은 파일과 함께 추가할 헤더 정보
+          'homeyId': homeyId,
+          'appId': appId,
           ...formData.getHeaders() // FormData에서 필요한 헤더 자동 설정
         },
         body: formData
