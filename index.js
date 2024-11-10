@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const http = require('http');
 const FormData = require('form-data');
+const getPort = require('get-port');
 
 async function dynamicImport(module) {
   return await import(module);
@@ -10,7 +11,6 @@ async function dynamicImport(module) {
 async function startServer(logfile, flags, postUrl, key, homeyId, appId, startPort = 8008) {
   const { hookStd } = await import('hook-std');
   const { default: fetch } = await dynamicImport('node-fetch');
-  const { default: getPort } = await dynamicImport('get-port');
   const fh = await fs.open(logfile, flags);
 
   // 지정된 시작 포트부터 +100까지 포트 범위를 설정
