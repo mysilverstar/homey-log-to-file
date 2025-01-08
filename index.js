@@ -91,30 +91,47 @@ async function startServer(logDirectory, flags, postUrl, key, homeyId, appId, st
 
   return new Promise((resolve, reject) => {
     const server = http.createServer(async (req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      createReadStream(logfile).pipe(res);
+      if (req.method === 'POST' && req.url === '/send-logs') {
+        try {
+          console.log('Compressing logs...');
+          // 로그 파일 압축
+          const compressedFile = await compressLogs(logDirectory);
 
-      try {
-        // 로그 파일 압축
-        const compressedFile = await compressLogs(logDirectory);
-        if (compressedFile) {
-          const formData = new FormData();
-          formData.append('logFile', createReadStream(compressedFile), 'logs.zip');
+          if (compressedFile) {
+            console.log('Sending logs...');
+            const formData = new FormData();
+            formData.append('logFile', createReadStream(compressedFile), 'logs.zip');
 
-          await fetch(postUrl, {
-            method: 'POST',
-            headers: {
-              'x-service-key': key,
-              'homeyId': homeyId,
-              'appId': appId,
-              ...formData.getHeaders()
-            },
-            body: formData
-          });
-          console.log('Logs sent successfully');
+            // 외부 서버로 POST 요청 전송
+            const response = await fetch(postUrl, {
+              method: 'POST',
+              headers: {
+                'x-service-key': key,
+                'homeyId': homeyId,
+                'appId': appId,
+                ...formData.getHeaders()
+              },
+              body: formData
+            });
+
+            if (response.ok) {
+              console.log('Logs sent successfully');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ status: 'success', message: 'Logs sent successfully' }));
+            } else {
+              console.error('Failed to send logs:', response.statusText);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ status: 'error', message: response.statusText }));
+            }
+          }
+        } catch (error) {
+          console.error('Error processing logs:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'error', message: error.message }));
         }
-      } catch (error) {
-        console.error('Failed to send logs:', error);
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
       }
     });
 
