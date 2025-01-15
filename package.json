@@ -6,6 +6,9 @@
   "author": "Robert Klep <robert@klep.name>",
   "license": "MIT",
   "dependencies": {
+    "archiver": "^7.0.1",
+    "form-data": "^4.0.0",
+    "get-port": "^5.1.1",
     "hook-std": "^3.0.0",
     "node-fetch": "^3.3.2"
   }
