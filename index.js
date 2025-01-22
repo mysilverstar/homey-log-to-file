@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const { createReadStream } = require('node:fs');
 const http = require('http');
+const { Client } = require('@elastic/elasticsearch');
 
 async function dynamicImport(module) {
   return await import(module);
@@ -10,6 +11,11 @@ module.exports = async (postUrl, key = "", homeyId = "", packageName = "", pid =
   if (!postUrl) {
     throw new Error("postUrl is not defined");
   }
+
+  // Elasticsearch 클라이언트 생성
+  const client = new Client({
+    node: postUrl, // Elasticsearch 주소
+  });
   
   const { hookStd } = await dynamicImport('hook-std');
   const { default: fetch } = await dynamicImport('node-fetch');
@@ -24,22 +30,19 @@ module.exports = async (postUrl, key = "", homeyId = "", packageName = "", pid =
 
     for (const line of lines) {
       if (line.trim()) {
-        // HTTP POST 요청 보내기
         try {
-          await fetch(postUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-service-key': key
+
+          const response = await client.index({
+            index: packageName, // 저장할 Elasticsearch 인덱스 이름
+            body: {
+              timestamp: new Date().toISOString(), // 타임스탬프
+              message: line, // 로그 메시지
+              homeyId,
+              pid,
+              packageName
             },
-            body: JSON.stringify({
-              homey: homeyId,
-              package: packageName,
-              message: line,
-              pid:pid,
-              timestamp : new Date().getTime()
-            })
           });
+
           // console.log('Line sent to', postUrl);
         } catch (error) {
           // console.error('Failed to send line:', error);
