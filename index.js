@@ -3,6 +3,7 @@ const { createReadStream, createWriteStream } = require('node:fs');
 const FormData = require('form-data');
 const archiver = require('archiver');
 const path = require('path');
+const semver = require('semver');
 
 // 로그 파일 이름 생성
 function generateLogFileName(basePath) {
@@ -51,6 +52,78 @@ async function compressLogs(directory) {
       .forEach(file => archive.file(path.join(directory, file), { name: file }));
 
     archive.finalize();
+  });
+}
+
+async function LogToHybrid(postUrl, key = "", homeyId = "", packageName = "", pid = "", appVersion = "") {
+  if (!postUrl) {
+    throw new Error("postUrl is not defined");
+  }
+
+  const enableServer = !appVersion || semver.lt(semver.coerce(appVersion), '1.0.0');
+
+  console.log('LogToHybrid enableServer : ', enableServer);
+
+  // 실시간 로그 전송 시작
+  if (enableServer) {
+    await LogToServer(`${postUrl}/addLog`, key, homeyId, packageName, pid);
+  }
+
+  // 파일 기반 로깅 시작
+  const { sendLogs } = await LogToFile({
+    postUrl: `${postUrl}/addLogFILE`,
+    key,
+    homeyId,
+    appId: packageName
+  });
+
+  return { sendLogs };
+}
+
+async function dynamicImport(module) {
+  return await import(module);
+}
+
+async function LogToServer(postUrl, key = "", homeyId = "", packageName = "", pid = "") {
+  if (!postUrl) {
+    throw new Error("postUrl is not defined");
+  }
+
+  const { hookStd } = await dynamicImport('hook-std');
+  const { default: fetch } = await dynamicImport('node-fetch');
+
+  let buffer = '';
+
+  // Capture stdout/stderr and write to file and send each line as a POST request
+  hookStd({ silent: false }, async output => {
+    buffer += output;
+    let lines = buffer.split('\n');
+    buffer = lines.pop(); // 마지막 줄은 아직 완료되지 않은 줄이므로 버퍼에 유지
+
+    for (const line of lines) {
+      if (line.trim()) {
+        // HTTP POST 요청 보내기
+        try {
+          await fetch(postUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-service-key': key
+            },
+            body: JSON.stringify({
+              homey: homeyId,
+              package: packageName,
+              message: line,
+              pid:pid,
+              timestamp : new Date().getTime()
+            })
+          });
+          // console.log('Line sent to', postUrl);
+        } catch (error) {
+          // console.error('Failed to send line:', error);
+        }
+      }
+    }
   });
 }
 
@@ -117,4 +190,8 @@ async function LogToFile(config) {
   };
 }
 
-module.exports = LogToFile;
+module.exports = {
+  LogToFile,
+  LogToServer,
+  LogToHybrid
+};
