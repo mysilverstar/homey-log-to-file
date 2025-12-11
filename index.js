@@ -1,22 +1,22 @@
-const fs = require('node:fs/promises');
-const { createReadStream, createWriteStream } = require('node:fs');
-const FormData = require('form-data');
-const archiver = require('archiver');
-const path = require('path');
-const semver = require('semver');
+const fs = require("node:fs/promises");
+const { createReadStream } = require("node:fs");
+// const FormData = require("form-data");
+const tar = require("tar");
+const path = require("path");
+const semver = require("semver");
 
-// 로그 파일 이름 생성
+/* ---------------- Utility ---------------- */
+
 function generateLogFileName(basePath) {
-  const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
+  const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
   return path.join(basePath, `std_${timestamp}.log`);
 }
 
-// 오래된 파일 삭제
 async function deleteOldFiles(directory, retentionDays = 15) {
   const files = await fs.readdir(directory);
   const now = Date.now();
   for (const file of files) {
-    if (file.startsWith('std_')) {
+    if (file.startsWith("std_")) {
       const filePath = path.join(directory, file);
       const stats = await fs.stat(filePath);
       const age = (now - stats.mtimeMs) / (1000 * 60 * 60 * 24);
@@ -28,170 +28,215 @@ async function deleteOldFiles(directory, retentionDays = 15) {
   }
 }
 
-// 로그 파일 압축
+// tar.gz compression
 async function compressLogs(directory) {
-  const files = await fs.readdir(directory);
-  const outputFile = path.join(directory, 'logs.zip');
+  const outputFile = path.join(directory, "logs.tar.gz");
+  const files = (await fs.readdir(directory)).filter((f) =>
+    f.startsWith("std_")
+  );
 
-  return new Promise((resolve, reject) => {
-    const output = createWriteStream(outputFile);
-    const archive = archiver('zip', { zlib: { level: 9 } });
-
-    output.on('close', () => {
-      console.log(`Compressed ${archive.pointer()} total bytes into: ${outputFile}`);
-      resolve(outputFile);
-    });
-
-    archive.on('error', (err) => reject(err));
-
-    archive.pipe(output);
-
-    // std_로 시작하는 모든 로그 파일 추가
+  await tar.c(
+    {
+      gzip: true,
+      file: outputFile,
+      cwd: directory,
+      gzipOptions: { level: 9 },
+    },
     files
-      .filter(file => file.startsWith('std_'))
-      .forEach(file => archive.file(path.join(directory, file), { name: file }));
+  );
 
-    archive.finalize();
-  });
+  console.log(`Compressed into: ${outputFile}`);
+  return outputFile;
 }
 
-async function LogToHybrid(postUrl, key = "", homeyId = "", packageName = "", pid = "", appVersion = "") {
-  if (!postUrl) {
-    throw new Error("postUrl is not defined");
-  }
-
-  const enableServer = !appVersion || semver.lt(semver.coerce(appVersion), '1.0.0');
-
-  console.log('LogToHybrid enableServer : ', enableServer);
-
-  // 실시간 로그 전송 시작
-  if (enableServer) {
-    await LogToServer(`${postUrl}/addLog`, key, homeyId, packageName, pid);
-  }
-
-  // 파일 기반 로깅 시작
-  const { sendLogs } = await LogToFile({
-    postUrl: `${postUrl}/addLogFILE`,
-    key,
-    homeyId,
-    appId: packageName
-  });
-
-  return { sendLogs };
-}
+/* ---------------- Remote Live Logging ---------------- */
 
 async function dynamicImport(module) {
   return await import(module);
 }
 
-async function LogToServer(postUrl, key = "", homeyId = "", packageName = "", pid = "") {
+async function LogToServer(
+  postUrl,
+  key = "",
+  homeyId = "",
+  packageName = "",
+  pid = ""
+) {
   if (!postUrl) {
     throw new Error("postUrl is not defined");
   }
 
-  const { hookStd } = await dynamicImport('hook-std');
-  const { default: fetch } = await dynamicImport('node-fetch');
+  const { hookStd } = await dynamicImport("hook-std");
 
-  let buffer = '';
+  let buffer = "";
 
-  // Capture stdout/stderr and write to file and send each line as a POST request
-  hookStd({ silent: false }, async output => {
+  hookStd({ silent: false }, async (output) => {
     buffer += output;
-    let lines = buffer.split('\n');
-    buffer = lines.pop(); // 마지막 줄은 아직 완료되지 않은 줄이므로 버퍼에 유지
+    let lines = buffer.split("\n");
+    buffer = lines.pop();
 
     for (const line of lines) {
       if (line.trim()) {
-        // HTTP POST 요청 보내기
         try {
           await fetch(postUrl, {
-            method: 'POST',
+            method: "POST",
             headers: {
-              'Content-Type': 'application/json',
-              'x-service-key': key
+              "Content-Type": "application/json",
+              "x-service-key": key,
             },
             body: JSON.stringify({
               homey: homeyId,
               package: packageName,
               message: line,
-              pid:pid,
-              timestamp : new Date().getTime()
-            })
+              pid,
+              timestamp: Date.now(),
+            }),
           });
-          // console.log('Line sent to', postUrl);
-        } catch (error) {
-          // console.error('Failed to send line:', error);
-        }
+        } catch (_) {}
       }
     }
   });
 }
 
-// 로그 저장 및 전송 기능
-async function LogToFile(config) {
-  const logDirectory = config.logDirectory || '/userdata/logs';
-  const flags = config.flags || 'a';
-  const postUrl = config.postUrl || '';
-  const key = config.key || '';
-  const homeyId = config.homeyId || 'unknown';
-  const appId = config.appId || 'unknown';
+/* ---------------- Buffered File Logging ---------------- */
 
-  // 로그 디렉토리 생성
+async function LogToFile(config) {
+  const logDirectory = config.logDirectory || "/userdata/logs";
+  const flags = config.flags || "a";
+  const postUrl = config.postUrl || "";
+  const key = config.key || "";
+  const homeyId = config.homeyId || "unknown";
+  const appId = config.appId || "unknown";
+
   await fs.mkdir(logDirectory, { recursive: true });
 
-  // 로그 파일 이름 생성 및 열기
   const logfile = generateLogFileName(logDirectory);
   const logFileHandle = await fs.open(logfile, flags);
 
-  // 오래된 파일 삭제
   await deleteOldFiles(logDirectory);
 
-  // 표준 출력/에러를 로그 파일에 기록
-  const { hookStd } = await import('hook-std');
-  hookStd({ silent: false }, output => logFileHandle.write(output));
+  const { hookStd } = await import("hook-std");
 
-  // 로그 전송 함수
+  // Buffered write setup
+  let logBuffer = [];
+  let flushTimer = null;
+  const MAX_BUFFER_LINES = 50;
+  const FLUSH_INTERVAL_MS = 5000;
+
+  async function flushLogs() {
+    if (logBuffer.length === 0) return;
+
+    const batch = logBuffer.join("");
+    logBuffer = [];
+
+    try {
+      await logFileHandle.write(batch);
+    } catch (err) {
+      console.error("Failed flushing logs:", err);
+    }
+
+    flushTimer = null;
+  }
+
+  function checkFlush() {
+    if (logBuffer.length >= MAX_BUFFER_LINES) {
+      flushLogs();
+      return;
+    }
+
+    if (!flushTimer) {
+      flushTimer = setTimeout(flushLogs, FLUSH_INTERVAL_MS);
+    }
+  }
+
+  hookStd({ silent: false }, (output) => {
+    logBuffer.push(output);
+    checkFlush();
+  });
+
+  /* --- sendLogs() uploads compressed logs --- */
+
   async function sendLogs() {
     try {
-      console.log('Compressing logs...');
+      await flushLogs();
+      console.log("Compressing logs...");
       const compressedFile = await compressLogs(logDirectory);
 
-      console.log('Sending logs...');
-      const formData = new FormData();
-      formData.append('logFile', createReadStream(compressedFile), 'logs.zip');
+      console.log("Sending logs...");
 
-      const { default: fetch } = await import('node-fetch');
+      // tar.gz 파일을 memory buffer로 읽기
+      const fileBuffer = await fs.readFile(compressedFile);
+
+      // WHATWG FormData + Blob 사용
+      const formData = new FormData();
+      formData.append("logFile", new Blob([fileBuffer], { type: "application/gzip" }), "logs.tar.gz");
+
       const response = await fetch(postUrl, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'x-service-key': key,
-          'homeyId': homeyId,
-          'appId': appId,
-          ...formData.getHeaders(),
+          "x-service-key": key,
+          homeyId,
+          appId,
         },
         body: formData,
       });
 
-      if (response.ok) {
-        console.log('Logs sent successfully');
-        return { status: 'success', message: 'Logs sent successfully' };
-      } else {
-        throw new Error(response.statusText);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`HTTP ${response.status} ${response.statusText} — ${errorText}`);
       }
+
+      console.log("Logs sent successfully");
+      return { status: "success", message: "Logs sent successfully" };
+
     } catch (error) {
-      console.error('Failed to send logs:', error);
+      console.error("Failed to send logs:", error);
       throw error;
     }
   }
-
   return {
-    sendLogs, // 로그 전송 함수 반환
-    logfile, // 현재 로그 파일 경로 반환
+    sendLogs,
+    logfile,
   };
 }
+
+/* ---------------- Hybrid Logging API ---------------- */
+
+async function LogToHybrid(
+  postUrl,
+  key = "",
+  homeyId = "",
+  packageName = "",
+  pid = "",
+  appVersion = ""
+) {
+  if (!postUrl) {
+    throw new Error("postUrl is not defined");
+  }
+
+  const enableServer =
+    !appVersion || semver.lt(semver.coerce(appVersion), "1.0.0");
+
+  console.log("LogToHybrid enableServer : ", enableServer);
+
+  if (enableServer) {
+    await LogToServer(`${postUrl}/addLog`, key, homeyId, packageName, pid);
+  }
+
+  const { sendLogs } = await LogToFile({
+    postUrl: `${postUrl}/addLogFILE`,
+    key,
+    homeyId,
+    appId: packageName,
+  });
+
+  return { sendLogs };
+}
+
+/* ---------------- export API ---------------- */
 
 module.exports = {
   LogToFile,
   LogToServer,
-  LogToHybrid
+  LogToHybrid,
 };
