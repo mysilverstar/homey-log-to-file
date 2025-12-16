@@ -84,7 +84,7 @@ async function hookStdoutToWinston(logger) {
  */
 async function compressAllLogs(logDirectory) {
   const files = (await fs.readdir(logDirectory))
-    .filter(f => f.startsWith("app.log"));
+    .filter(f => /^app(\d+)?\.log$/.test(f));
 
   if (files.length === 0) return null;
 
