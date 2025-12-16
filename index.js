@@ -1,59 +1,111 @@
 const fs = require("node:fs/promises");
-const { createReadStream } = require("node:fs");
-// const FormData = require("form-data");
-const tar = require("tar");
 const path = require("path");
+const tar = require("tar");
 const semver = require("semver");
+const winston = require("winston");
 
-/* ---------------- Utility ---------------- */
+/* ======================================================
+ * Winston Logger (파일 관리 전담)
+ * ====================================================== */
 
-function generateLogFileName(basePath) {
-  const timestamp = new Date().toISOString().replace(/[-:.]/g, "");
-  return path.join(basePath, `std_${timestamp}.log`);
+/**
+ * - app.log 기준으로 로그 기록
+ * - 파일당 5MB
+ * - 최대 20개 (약 100MB)
+ * - 오래된 파일 자동 삭제
+ */
+function createFileLogger(logDirectory) {
+  return winston.createLogger({
+    level: "info",
+    format: winston.format.printf(info => info.message),
+    transports: [
+      new winston.transports.File({
+        dirname: logDirectory,
+        filename: "app.log",              // 🔥 std.log → app.log
+        maxsize: 5 * 1024 * 1024,          // 5MB
+        maxFiles: 20,                      // 최대 100MB
+        tailable: true,
+      }),
+    ],
+  });
 }
 
-async function deleteOldFiles(directory, retentionDays = 15) {
-  const files = await fs.readdir(directory);
-  const now = Date.now();
+/* ======================================================
+ * Legacy Log Cleanup (전환 1회용)
+ * ====================================================== */
+
+/**
+ * 기존 구현에서 사용하던 로그 파일 전부 삭제
+ * - std_*.log
+ * - std.log*
+ */
+async function cleanLegacyLogs(logDirectory) {
+  const files = await fs.readdir(logDirectory);
+
   for (const file of files) {
-    if (file.startsWith("std_")) {
-      const filePath = path.join(directory, file);
-      const stats = await fs.stat(filePath);
-      const age = (now - stats.mtimeMs) / (1000 * 60 * 60 * 24);
-      if (age > retentionDays) {
-        await fs.unlink(filePath);
-        console.log(`Deleted old log file: ${filePath}`);
-      }
+    if (file.startsWith("std_") || file.startsWith("std.log")) {
+      await fs.unlink(path.join(logDirectory, file));
     }
   }
+
+  console.log("[log] legacy logs cleared");
 }
 
-// tar.gz compression
-async function compressLogs(directory) {
-  const outputFile = path.join(directory, "logs.tar.gz");
-  const files = (await fs.readdir(directory)).filter((f) =>
-    f.startsWith("std_")
-  );
+/* ======================================================
+ * stdout / stderr → Winston
+ * ====================================================== */
+
+async function hookStdoutToWinston(logger) {
+  const { hookStd } = await import("hook-std");
+
+  let buffer = "";
+
+  hookStd({ silent: false }, output => {
+    buffer += output;
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (line.trim()) {
+        logger.info(line);
+      }
+    }
+  });
+}
+
+/* ======================================================
+ * Log Compression (스냅샷)
+ * ====================================================== */
+
+/**
+ * 현재 존재하는 모든 Winston 로그 파일(app.log*)
+ * - app.log 포함
+ * - write 중이어도 그대로 압축 (스냅샷)
+ */
+async function compressAllLogs(logDirectory) {
+  const files = (await fs.readdir(logDirectory))
+    .filter(f => f.startsWith("app.log"));
+
+  if (files.length === 0) return null;
+
+  const outputFile = path.join(logDirectory, "logs.tar.gz");
 
   await tar.c(
     {
       gzip: true,
       file: outputFile,
-      cwd: directory,
+      cwd: logDirectory,
       gzipOptions: { level: 9 },
     },
     files
   );
 
-  console.log(`Compressed into: ${outputFile}`);
   return outputFile;
 }
 
-/* ---------------- Remote Live Logging ---------------- */
-
-async function dynamicImport(module) {
-  return await import(module);
-}
+/* ======================================================
+ * Remote Live Logging (라인 단위)
+ * ====================================================== */
 
 async function LogToServer(
   postUrl,
@@ -62,47 +114,44 @@ async function LogToServer(
   packageName = "",
   pid = ""
 ) {
-  if (!postUrl) {
-    throw new Error("postUrl is not defined");
-  }
+  if (!postUrl) throw new Error("postUrl is not defined");
 
-  const { hookStd } = await dynamicImport("hook-std");
-
+  const { hookStd } = await import("hook-std");
   let buffer = "";
 
-  hookStd({ silent: false }, async (output) => {
+  hookStd({ silent: false }, async output => {
     buffer += output;
-    let lines = buffer.split("\n");
+    const lines = buffer.split("\n");
     buffer = lines.pop();
 
     for (const line of lines) {
-      if (line.trim()) {
-        try {
-          await fetch(postUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-service-key": key,
-            },
-            body: JSON.stringify({
-              homey: homeyId,
-              package: packageName,
-              message: line,
-              pid,
-              timestamp: Date.now(),
-            }),
-          });
-        } catch (_) {}
-      }
+      if (!line.trim()) continue;
+      try {
+        await fetch(postUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-service-key": key,
+          },
+          body: JSON.stringify({
+            homey: homeyId,
+            package: packageName,
+            message: line,
+            pid,
+            timestamp: Date.now(),
+          }),
+        });
+      } catch (_) {}
     }
   });
 }
 
-/* ---------------- Buffered File Logging ---------------- */
+/* ======================================================
+ * File Logging (Winston 기반)
+ * ====================================================== */
 
 async function LogToFile(config) {
   const logDirectory = config.logDirectory || "/userdata/logs";
-  const flags = config.flags || "a";
   const postUrl = config.postUrl || "";
   const key = config.key || "";
   const homeyId = config.homeyId || "unknown";
@@ -110,66 +159,33 @@ async function LogToFile(config) {
 
   await fs.mkdir(logDirectory, { recursive: true });
 
-  const logfile = generateLogFileName(logDirectory);
-  const logFileHandle = await fs.open(logfile, flags);
+  // 🔥 Winston 전환 시점: 기존 로그 완전 정리
+  await cleanLegacyLogs(logDirectory);
 
-  await deleteOldFiles(logDirectory);
+  // 1️⃣ Winston logger 생성
+  const logger = createFileLogger(logDirectory);
 
-  const { hookStd } = await import("hook-std");
+  // 2️⃣ stdout / stderr → Winston 연결
+  await hookStdoutToWinston(logger);
 
-  // Buffered write setup
-  let logBuffer = [];
-  let flushTimer = null;
-  const MAX_BUFFER_LINES = 50;
-  const FLUSH_INTERVAL_MS = 5000;
-
-  async function flushLogs() {
-    if (logBuffer.length === 0) return;
-
-    const batch = logBuffer.join("");
-    logBuffer = [];
-
-    try {
-      await logFileHandle.write(batch);
-    } catch (err) {
-      console.error("Failed flushing logs:", err);
-    }
-
-    flushTimer = null;
-  }
-
-  function checkFlush() {
-    if (logBuffer.length >= MAX_BUFFER_LINES) {
-      flushLogs();
-      return;
-    }
-
-    if (!flushTimer) {
-      flushTimer = setTimeout(flushLogs, FLUSH_INTERVAL_MS);
-    }
-  }
-
-  hookStd({ silent: false }, (output) => {
-    logBuffer.push(output);
-    checkFlush();
-  });
-
-  /* --- sendLogs() uploads compressed logs --- */
+  /* -------- sendLogs -------- */
 
   async function sendLogs() {
     try {
-      await flushLogs();
-      console.log("Compressing logs...");
-      const compressedFile = await compressLogs(logDirectory);
+      const compressedFile = await compressAllLogs(logDirectory);
 
-      console.log("Sending logs...");
+      if (!compressedFile) {
+        return { status: "empty", message: "No logs to send" };
+      }
 
-      // tar.gz 파일을 memory buffer로 읽기
       const fileBuffer = await fs.readFile(compressedFile);
-
-      // WHATWG FormData + Blob 사용
       const formData = new FormData();
-      formData.append("logFile", new Blob([fileBuffer], { type: "application/gzip" }), "logs.tar.gz");
+
+      formData.append(
+        "logFile",
+        new Blob([fileBuffer], { type: "application/gzip" }),
+        "logs.tar.gz"
+      );
 
       const response = await fetch(postUrl, {
         method: "POST",
@@ -182,25 +198,26 @@ async function LogToFile(config) {
       });
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(`HTTP ${response.status} ${response.statusText} — ${errorText}`);
+        const text = await response.text().catch(() => "");
+        throw new Error(`HTTP ${response.status} ${text}`);
       }
 
-      console.log("Logs sent successfully");
-      return { status: "success", message: "Logs sent successfully" };
+      // ✔ 업로드 후 로컬 로그 유지
+      await fs.unlink(compressedFile);
 
-    } catch (error) {
-      console.error("Failed to send logs:", error);
-      throw error;
+      return { status: "success", message: "Logs sent successfully" };
+    } catch (err) {
+      console.error("sendLogs failed:", err);
+      throw err;
     }
   }
-  return {
-    sendLogs,
-    logfile,
-  };
+
+  return { sendLogs };
 }
 
-/* ---------------- Hybrid Logging API ---------------- */
+/* ======================================================
+ * Hybrid Logging API
+ * ====================================================== */
 
 async function LogToHybrid(
   postUrl,
@@ -210,14 +227,10 @@ async function LogToHybrid(
   pid = "",
   appVersion = ""
 ) {
-  if (!postUrl) {
-    throw new Error("postUrl is not defined");
-  }
+  if (!postUrl) throw new Error("postUrl is not defined");
 
   const enableServer =
     !appVersion || semver.lt(semver.coerce(appVersion), "1.0.0");
-
-  console.log("LogToHybrid enableServer : ", enableServer);
 
   if (enableServer) {
     await LogToServer(`${postUrl}/addLog`, key, homeyId, packageName, pid);
@@ -233,7 +246,9 @@ async function LogToHybrid(
   return { sendLogs };
 }
 
-/* ---------------- export API ---------------- */
+/* ======================================================
+ * export API
+ * ====================================================== */
 
 module.exports = {
   LogToFile,
