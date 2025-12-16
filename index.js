@@ -23,7 +23,7 @@ function createFileLogger(logDirectory) {
         dirname: logDirectory,
         filename: "app.log",              // 🔥 std.log → app.log
         maxsize: 5 * 1024 * 1024,          // 5MB
-        maxFiles: 20,                      // 최대 100MB
+        maxFiles: 3,                      // 최대 100MB
         tailable: true,
       }),
     ],
