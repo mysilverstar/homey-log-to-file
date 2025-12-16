@@ -22,8 +22,8 @@ function createFileLogger(logDirectory) {
       new winston.transports.File({
         dirname: logDirectory,
         filename: "app.log",              // 🔥 std.log → app.log
-        maxsize: 5 * 1024 * 1024,          // 5MB
-        maxFiles: 3,                      // 최대 100MB
+        maxsize: 2 * 1024 * 1024,          // 2MB
+        maxFiles: 10,                      // 최대 20MB
         tailable: true,
       }),
     ],
