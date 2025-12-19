@@ -238,9 +238,16 @@ async function LogToHybrid(
   homeyId = "",
   packageName = "",
   pid = "",
-  appVersion = ""
+  appVersion = "",
+  options = {}
 ) {
   if (!postUrl) throw new Error("postUrl is not defined");
+
+  // 🔥 options 안전 처리
+  const {
+    maxSize,
+    maxFiles,
+  } = (options && typeof options === "object") ? options : {};
 
   const enableServer =
     !appVersion || semver.lt(semver.coerce(appVersion), "1.0.0");
@@ -254,6 +261,8 @@ async function LogToHybrid(
     key,
     homeyId,
     appId: packageName,
+    maxSize,
+    maxFiles,
   });
 
   return { sendLogs };
