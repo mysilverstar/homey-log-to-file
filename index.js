@@ -8,22 +8,32 @@ const winston = require("winston");
  * Winston Logger (파일 관리 전담)
  * ====================================================== */
 
+const DEFAULT_LOG_OPTIONS = {
+  maxSize: 1 * 1024 * 1024, // 1MB
+  maxFiles: 10,
+};
+
 /**
  * - app.log 기준으로 로그 기록
- * - 파일당 5MB
- * - 최대 20개 (약 100MB)
+ * - 파일당 1MB
+ * - 최대 10개 (약 10MB)
  * - 오래된 파일 자동 삭제
  */
-function createFileLogger(logDirectory) {
+function createFileLogger(logDirectory, options = {}) {
+  const {
+    maxSize = DEFAULT_LOG_OPTIONS.maxSize,
+    maxFiles = DEFAULT_LOG_OPTIONS.maxFiles,
+  } = options;
+
   return winston.createLogger({
     level: "info",
     format: winston.format.printf(info => info.message),
     transports: [
       new winston.transports.File({
         dirname: logDirectory,
-        filename: "app.log",              // 🔥 std.log → app.log
-        maxsize: 1 * 1024 * 1024,          // 1MB
-        maxFiles: 10,                      // 최대 10MB
+        filename: "app.log",
+        maxsize: maxSize,   // 🔥 override 가능
+        maxFiles: maxFiles, // 🔥 override 가능
         tailable: true,
       }),
     ],
@@ -163,7 +173,10 @@ async function LogToFile(config) {
   await cleanLegacyLogs(logDirectory);
 
   // 1️⃣ Winston logger 생성
-  const logger = createFileLogger(logDirectory);
+  const logger = createFileLogger(logDirectory, {
+    maxSize: config.maxSize,
+    maxFiles: config.maxFiles,
+  });
 
   // 2️⃣ stdout / stderr → Winston 연결
   await hookStdoutToWinston(logger);
