@@ -14,13 +14,14 @@ const DEFAULT_LOG_OPTIONS = {
 };
 
 /**
- * - app.log 기준으로 로그 기록
+ * - 지정된 파일명 기준으로 로그 기록 (기본: app.log)
  * - 파일당 1MB
  * - 최대 10개 (약 10MB)
  * - 오래된 파일 자동 삭제
  */
 function createFileLogger(logDirectory, options = {}) {
   const {
+    filename = "app.log",
     maxSize = DEFAULT_LOG_OPTIONS.maxSize,
     maxFiles = DEFAULT_LOG_OPTIONS.maxFiles,
   } = options;
@@ -31,7 +32,7 @@ function createFileLogger(logDirectory, options = {}) {
     transports: [
       new winston.transports.File({
         dirname: logDirectory,
-        filename: "app.log",
+        filename,
         maxsize: maxSize,   // 🔥 override 가능
         maxFiles: maxFiles, // 🔥 override 가능
         tailable: true,
@@ -48,12 +49,18 @@ function createFileLogger(logDirectory, options = {}) {
  * 기존 구현에서 사용하던 로그 파일 전부 삭제
  * - std_*.log
  * - std.log*
+ * - app.log* (커스텀 파일명 사용 시)
  */
-async function cleanLegacyLogs(logDirectory) {
+async function cleanLegacyLogs(logDirectory, filename = "app.log") {
   const files = await fs.readdir(logDirectory);
+  const cleanAppLog = filename !== "app.log";
 
   for (const file of files) {
-    if (file.startsWith("std_") || file.startsWith("std.log")) {
+    if (
+      file.startsWith("std_") ||
+      file.startsWith("std.log") ||
+      (cleanAppLog && /^app\d*\.log$/.test(file))
+    ) {
       await fs.unlink(path.join(logDirectory, file));
     }
   }
@@ -88,13 +95,15 @@ async function hookStdoutToWinston(logger) {
  * ====================================================== */
 
 /**
- * 현재 존재하는 모든 Winston 로그 파일(app.log*)
- * - app.log 포함
+ * 현재 존재하는 모든 Winston 로그 파일
+ * - 지정된 파일명 기준 (기본: app.log)
  * - write 중이어도 그대로 압축 (스냅샷)
  */
-async function compressAllLogs(logDirectory) {
+async function compressAllLogs(logDirectory, filename = "app.log") {
+  const { name, ext } = path.parse(filename);
+  const pattern = new RegExp(`^${name}\\d*\\${ext}$`);
   const files = (await fs.readdir(logDirectory))
-    .filter(f => /^app(\d+)?\.log$/.test(f));
+    .filter(f => pattern.test(f));
 
   if (files.length === 0) return null;
 
@@ -167,13 +176,16 @@ async function LogToFile(config) {
   const homeyId = config.homeyId || "unknown";
   const appId = config.appId || "unknown";
 
+  const filename = config.filename || "app.log";
+
   await fs.mkdir(logDirectory, { recursive: true });
 
   // 🔥 Winston 전환 시점: 기존 로그 완전 정리
-  await cleanLegacyLogs(logDirectory);
+  await cleanLegacyLogs(logDirectory, filename);
 
   // 1️⃣ Winston logger 생성
   const logger = createFileLogger(logDirectory, {
+    filename,
     maxSize: config.maxSize,
     maxFiles: config.maxFiles,
   });
@@ -185,7 +197,7 @@ async function LogToFile(config) {
 
   async function sendLogs() {
     try {
-      const compressedFile = await compressAllLogs(logDirectory);
+      const compressedFile = await compressAllLogs(logDirectory, filename);
 
       if (!compressedFile) {
         return { status: "empty", message: "No logs to send" };
@@ -245,6 +257,7 @@ async function LogToHybrid(
 
   // 🔥 options 안전 처리
   const {
+    filename,
     maxSize,
     maxFiles,
   } = (options && typeof options === "object") ? options : {};
@@ -261,6 +274,7 @@ async function LogToHybrid(
     key,
     homeyId,
     appId: packageName,
+    filename,
     maxSize,
     maxFiles,
   });
