@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const fs = require("node:fs/promises");
 const path = require("path");
 const tar = require("tar");
@@ -7,6 +8,20 @@ const winston = require("winston");
 /* ======================================================
  * Winston Logger (파일 관리 전담)
  * ====================================================== */
+
+/**
+ * homeyId를 SHA256 해시하여 뒤 16자리를 파일명으로 반환
+ * 실패 시 'app.log' 폴백
+ */
+function getLogFilename(homeyId) {
+  try {
+    if (!homeyId || typeof homeyId !== "string") throw new Error("invalid homeyId");
+    const hash = crypto.createHash("sha256").update(homeyId).digest("hex");
+    return `${hash.slice(-16)}.log`;
+  } catch (_) {
+    return "app.log";
+  }
+}
 
 const DEFAULT_LOG_OPTIONS = {
   maxSize: 1 * 1024 * 1024, // 1MB
@@ -176,7 +191,7 @@ async function LogToFile(config) {
   const homeyId = config.homeyId || "unknown";
   const appId = config.appId || "unknown";
 
-  const filename = config.filename || "app.log";
+  const filename = getLogFilename(homeyId);
 
   await fs.mkdir(logDirectory, { recursive: true });
 
@@ -257,7 +272,6 @@ async function LogToHybrid(
 
   // 🔥 options 안전 처리
   const {
-    filename,
     maxSize,
     maxFiles,
   } = (options && typeof options === "object") ? options : {};
@@ -274,7 +288,6 @@ async function LogToHybrid(
     key,
     homeyId,
     appId: packageName,
-    filename,
     maxSize,
     maxFiles,
   });
