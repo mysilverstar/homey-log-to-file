@@ -23,6 +23,10 @@ function getLogFilename(homeyId) {
   }
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const DEFAULT_LOG_OPTIONS = {
   maxSize: 1 * 1024 * 1024, // 1MB
   maxFiles: 10,
@@ -116,7 +120,9 @@ async function hookStdoutToWinston(logger) {
  */
 async function compressAllLogs(logDirectory, filename = "app.log") {
   const { name, ext } = path.parse(filename);
-  const pattern = new RegExp(`^${name}\\d*\\${ext}$`);
+  const safeName = escapeRegex(name);
+  const safeExt = escapeRegex(ext);
+  const pattern = new RegExp(`^${safeName}\\d*${safeExt}$`);
   const files = (await fs.readdir(logDirectory))
     .filter(f => pattern.test(f));
 
@@ -191,7 +197,9 @@ async function LogToFile(config) {
   const homeyId = config.homeyId || "unknown";
   const appId = config.appId || "unknown";
 
-  const filename = getLogFilename(homeyId);
+  const requestedFilename =
+    typeof config.filename === "string" ? config.filename.trim() : "";
+  const filename = requestedFilename || getLogFilename(homeyId);
 
   await fs.mkdir(logDirectory, { recursive: true });
 
@@ -274,6 +282,7 @@ async function LogToHybrid(
   const {
     maxSize,
     maxFiles,
+    filename,
   } = (options && typeof options === "object") ? options : {};
 
   const enableServer =
@@ -288,6 +297,7 @@ async function LogToHybrid(
     key,
     homeyId,
     appId: packageName,
+    filename,
     maxSize,
     maxFiles,
   });
