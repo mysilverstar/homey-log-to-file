@@ -5,11 +5,13 @@
   "main": "index.js",
   "author": "Robert Klep <robert@klep.name>",
   "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "form-data": "^4.0.0",
     "hook-std": "^3.0.0",
     "semver": "^7.7.1",
-    "tar": "^7.5.11",
+    "tar": "^7.5.22",
     "winston": "^3.19.0"
   }
 }
